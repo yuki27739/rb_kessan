@@ -25,7 +25,7 @@ def initialize_database(db_path="data/securities_database.xlsx"):
         ws.title = "証券データ"
         
         # ヘッダーを設定
-        headers = ['年月', '国債', '地方債', '短期社債', '社債', '株式', '外国証券', 'その他の証券', '更新日時']
+        headers = ['年月', '国債', '地方債', '短期社債', '社債', '株式', '外国証券', 'その他の証券', '貸出金', '更新日時']
         for col, header in enumerate(headers, 1):
             ws.cell(row=1, column=col, value=header)
         
@@ -56,7 +56,7 @@ def save_to_database(data, db_path="data/securities_database.xlsx"):
                 break
         
         # データを書き込む列の順序
-        columns = ['年月', '国債', '地方債', '短期社債', '社債', '株式', '外国証券', 'その他の証券', '更新日時']
+        columns = ['年月', '国債', '地方債', '短期社債', '社債', '株式', '外国証券', 'その他の証券', '貸出金', '更新日時']
         
         if existing_row:
             # 既存レコードを更新
@@ -187,13 +187,14 @@ def extract_securities_from_pdf(pdf_file):
                 # 抽出対象の証券項目（スペースを含む形式も考慮）
                 # 注意: 検索順序が重要！より具体的なパターンを先に検索する
                 securities_patterns = {
+                    '貸出金': ['貸 出 金', '貸出金'],  # 貸出金を最初に追加
                     '短期社債': ['短 期 社 債', '短期社債'],  # 「社債」より先に検索
                     '社債': ['社 債', '社債'],                # 「短期社債」の後に検索
                     '国債': ['国 債', '国債'],
                     '地方債': ['地 方 債', '地方債'],
                     '株式': ['株 式', '株式'],
                     '外国証券': ['外 国 証 券', '外国証券'],
-                    'その他の証券': ['そ の 他 の 証 券', 'その他の証券', 'そ の 他 証 券']
+                    'その他の証券': ['そ の 他 の 証 券', 'その他の証券']
                 }
                 
                 securities_data = {}
@@ -352,6 +353,7 @@ def extract_securities_from_pdf(pdf_file):
                 # 証券キーワードを含む行をテーブルから探す
                 st.write("**証券を含むテーブル行の詳細:**")
                 securities_patterns = {
+                    '貸出金': ['貸 出 金', '貸出金', '貸 出'],  # 貸出金を最初に追加
                     '短期社債': ['短 期 社 債', '短期社債'],  # 「社債」より先に検索
                     '社債': ['社 債', '社債'],                # 「短期社債」の後に検索
                     '国債': ['国 債', '国債'],
@@ -388,7 +390,8 @@ def extract_securities_from_pdf(pdf_file):
             
             return {
                 '年月': year_month,
-                **securities_data
+                **{k: v for k, v in securities_data.items() if k != '貸出金'},  # 貸出金以外を先に追加
+                '貸出金': securities_data.get('貸出金', '0'),  # 貸出金を最後に追加
             }
         
     except Exception as e:
@@ -396,7 +399,7 @@ def extract_securities_from_pdf(pdf_file):
         return None
 
 # メインアプリケーション
-st.title("🏦 証券データ抽出システム")
+st.title("🏦 地方銀行財務データ抽出システム")
 st.markdown("---")
 
 # サイドバー
@@ -439,7 +442,7 @@ if page == "データ抽出":
             # 証券データを3列で表示
             col1, col2, col3 = st.columns(3)
             
-            securities_list = ['国債', '地方債', '短期社債', '社債', '株式', '外国証券', 'その他の証券']
+            securities_list = ['国債', '地方債', '短期社債', '社債', '株式', '外国証券', 'その他の証券', '貸出金']
             
             for i, security in enumerate(securities_list):
                 col_idx = i % 3
@@ -480,6 +483,7 @@ if page == "データ抽出":
                     corrected_amounts['株式'] = st.text_input("株式 (百万円)", value=extracted_data['株式'])
                     corrected_amounts['外国証券'] = st.text_input("外国証券 (百万円)", value=extracted_data['外国証券'])
                     corrected_amounts['その他の証券'] = st.text_input("その他の証券 (百万円)", value=extracted_data['その他の証券'])
+                    corrected_amounts['貸出金'] = st.text_input("貸出金 (百万円)", value=extracted_data.get('貸出金', '0'))
                 
                 if st.form_submit_button("💾 確定"):
                     try:
@@ -515,7 +519,7 @@ if page == "データ抽出":
                 display_data = []
                 for security in securities_list:
                     display_data.append({
-                        '証券種類': security,
+                        '資産種類': security,
                         '金額（百万円）': f"{final_data[security]:,}"
                     })
                 
@@ -585,7 +589,7 @@ if page == "データ抽出":
 
 elif page == "グラフ表示":
     # グラフ表示ページ
-    st.subheader("📈 証券データの時系列グラフ")
+    st.subheader("📈 地方銀行財務データ分析グラフ")
     
     # データベースを読み込み
     db_df = load_database()
@@ -594,349 +598,281 @@ elif page == "グラフ表示":
         # データを年月順にソート（昇順：時系列用）
         db_df_sorted = db_df.sort_values('年月', ascending=True)
         
-        # 証券の種類リスト
-        securities_columns = ['国債', '地方債', '短期社債', '社債', '株式', '外国証券', 'その他の証券']
+        # 期間選択オプション
+        st.subheader("📅 表示期間の選択")
         
-        # グラフオプション
-        col_opt1, col_opt2, col_opt3 = st.columns(3)
-        with col_opt1:
-            graph_category = st.selectbox(
-                "グラフカテゴリ",
-                ["金額グラフ", "比率グラフ"]
+        # 利用可能な年月のリストを取得
+        available_periods = db_df_sorted['年月'].tolist()
+        
+        # デフォルトは直近5データ分
+        default_start_idx = max(0, len(available_periods) - 5)
+        default_end_idx = len(available_periods) - 1
+        
+        # 期間選択UI
+        col_period1, col_period2 = st.columns(2)
+        
+        with col_period1:
+            start_period = st.selectbox(
+                "開始年月",
+                available_periods,
+                index=default_start_idx,
+                key="start_period"
             )
         
-        with col_opt2:
-            if graph_category == "金額グラフ":
-                chart_type = st.selectbox(
-                    "グラフの種類を選択",
-                    ["積み上げ棒グラフ", "線グラフ", "エリアグラフ"]
-                )
-            else:  # 比率グラフ
-                chart_type = st.selectbox(
-                    "グラフの種類を選択",
-                    ["円グラフ（最新期）", "比率積み上げ棒グラフ", "比率線グラフ"]
-                )
+        with col_period2:
+            end_period = st.selectbox(
+                "終了年月", 
+                available_periods,
+                index=default_end_idx,
+                key="end_period"
+            )
         
-        with col_opt3:
-            if graph_category == "金額グラフ":
-                show_total = st.checkbox("合計値を表示", value=True)
-            else:
-                show_total = False
+        # 期間でデータをフィルタ
+        filtered_data = db_df_sorted[
+            (db_df_sorted['年月'] >= start_period) & 
+            (db_df_sorted['年月'] <= end_period)
+        ].copy()
         
-        # データの準備
-        chart_data = db_df_sorted[['年月'] + securities_columns].copy()
-        
-        # 数値型に変換（エラー処理付き）
-        for col in securities_columns:
-            chart_data[col] = pd.to_numeric(chart_data[col], errors='coerce').fillna(0)
-        
-        # 合計値を計算
-        chart_data['合計'] = chart_data[securities_columns].sum(axis=1)
-        
-        # 比率データの準備（比率グラフの場合）
-        if graph_category == "比率グラフ":
-            ratio_data = chart_data.copy()
+        if filtered_data.empty:
+            st.error("選択された期間にデータがありません。")
+        else:
+            # 証券の種類リスト
+            securities_columns = ['国債', '地方債', '短期社債', '社債', '株式', '外国証券', 'その他の証券', '貸出金']
+            
+            # 数値型に変換（エラー処理付き）
             for col in securities_columns:
-                # 合計が0でない行のみ比率を計算
-                ratio_data[col] = ratio_data.apply(
-                    lambda row: (row[col] / row['合計'] * 100) if row['合計'] > 0 else 0, 
+                filtered_data[col] = pd.to_numeric(filtered_data[col], errors='coerce').fillna(0)
+            
+            # 各種計算用のデータを準備
+            # 有価証券合計（貸出金以外）
+            securities_only = ['国債', '地方債', '短期社債', '社債', '株式', '外国証券', 'その他の証券']
+            filtered_data['有価証券合計'] = filtered_data[securities_only].sum(axis=1)
+            
+            # 円債合計
+            bonds = ['国債', '地方債', '短期社債', '社債']
+            filtered_data['円債合計'] = filtered_data[bonds].sum(axis=1)
+            
+            # 有価証券と貸出金の合計
+            filtered_data['有価証券_貸出金合計'] = filtered_data['有価証券合計'] + filtered_data['貸出金']
+            
+            # リスク性証券
+            risk_securities = ['株式', '外国証券', 'その他の証券']
+            
+            st.markdown("---")
+            
+            # グラフ1: 円債の有価証券に占める割合
+            st.subheader("📊 グラフ1: 円債の有価証券に占める構成比の変動")
+            
+            fig1 = go.Figure()
+            colors1 = ['#FF6B6B', '#4ECDC4', '#45B7D1', '#96CEB4']
+            markers1 = ['circle', 'square', 'diamond', 'triangle-up']
+            
+            for i, bond_type in enumerate(bonds):
+                # 各円債の有価証券に占める割合を計算
+                ratio = filtered_data.apply(
+                    lambda row: (row[bond_type] / row['有価証券合計'] * 100) if row['有価証券合計'] > 0 else 0,
                     axis=1
                 )
-        
-        # 金額グラフの場合は合計値表示オプションを適用
-        if graph_category == "金額グラフ" and show_total:
-            chart_data['合計表示用'] = chart_data['合計']
-        
-        # グラフを作成
-        if graph_category == "金額グラフ":
-            if chart_type == "積み上げ棒グラフ":
-                fig = go.Figure()
                 
-                # 各証券種類の棒を追加
-                colors = px.colors.qualitative.Set3
-                for i, security in enumerate(securities_columns):
-                    fig.add_trace(go.Bar(
-                        name=security,
-                        x=chart_data['年月'],
-                        y=chart_data[security],
-                        marker_color=colors[i % len(colors)]
-                    ))
+                # 開始時点からの変化率を計算（開始時点を0とする）
+                base_ratio = ratio.iloc[0] if len(ratio) > 0 else 0
+                change_rate = ratio - base_ratio
                 
-                fig.update_layout(
-                    title="証券データの時系列推移（積み上げ棒グラフ）",
-                    xaxis_title="年月",
-                    yaxis_title="金額（百万円）",
-                    barmode='stack',
-                    height=600,
-                    legend=dict(
-                        orientation="h",
-                        yanchor="bottom",
-                        y=1.02,
-                        xanchor="right",
-                        x=1
-                    )
+                fig1.add_trace(go.Scatter(
+                    name=bond_type,
+                    x=filtered_data['年月'],
+                    y=change_rate,
+                    mode='lines+markers',
+                    line=dict(color=colors1[i], width=3),
+                    marker=dict(size=10, symbol=markers1[i])
+                ))
+            
+            fig1.update_layout(
+                title="円債の有価証券に占める構成比の変動（開始時点からの変化）",
+                xaxis_title="年月",
+                yaxis_title="構成比変動（%ポイント）",
+                height=400,
+                xaxis=dict(
+                    tickmode='array',
+                    tickvals=filtered_data['年月'],
+                    ticktext=[f"{period[:4]}年{period[5:7]}月" for period in filtered_data['年月']],
+                    tickangle=0
+                ),
+                yaxis=dict(
+                    zeroline=True,
+                    zerolinewidth=1,
+                    zerolinecolor="rgba(128,128,128,0.8)"
+                ),
+                legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
+            )
+            
+            st.plotly_chart(fig1, use_container_width=True)
+            
+            # グラフ2: 円債と貸出金の有価証券と貸出金に占める割合
+            st.subheader("📊 グラフ2: 円債と貸出金の構成比の変動")
+            
+            fig2 = go.Figure()
+            colors2 = ['#FF6B6B', '#4ECDC4', '#45B7D1', '#96CEB4', '#6BCF7F']
+            markers2 = ['circle', 'square', 'diamond', 'triangle-up', 'pentagon']
+            
+            # 円債の各資産（国債、地方債、短期社債、社債）の有価証券と貸出金に占める割合
+            bonds_with_loans = ['国債', '地方債', '短期社債', '社債', '貸出金']
+            
+            for i, asset in enumerate(bonds_with_loans):
+                # 各資産の有価証券と貸出金に占める割合を計算
+                ratio = filtered_data.apply(
+                    lambda row: (row[asset] / row['有価証券_貸出金合計'] * 100) if row['有価証券_貸出金合計'] > 0 else 0,
+                    axis=1
                 )
                 
-            elif chart_type == "線グラフ":
-                fig = go.Figure()
+                # 開始時点からの変化率を計算（開始時点を0とする）
+                base_ratio = ratio.iloc[0] if len(ratio) > 0 else 0
+                change_rate = ratio - base_ratio
                 
-                colors = px.colors.qualitative.Set3
-                for i, security in enumerate(securities_columns):
-                    fig.add_trace(go.Scatter(
-                        name=security,
-                        x=chart_data['年月'],
-                        y=chart_data[security],
-                        mode='lines+markers',
-                        line_color=colors[i % len(colors)]
-                    ))
-                
-                if show_total:
-                    fig.add_trace(go.Scatter(
-                        name='合計',
-                        x=chart_data['年月'],
-                        y=chart_data['合計'],
-                        mode='lines+markers',
-                        line=dict(width=3, color='black', dash='dash')
-                    ))
-                
-                fig.update_layout(
-                    title="証券データの時系列推移（線グラフ）",
-                    xaxis_title="年月",
-                    yaxis_title="金額（百万円）",
-                    height=600,
-                    legend=dict(
-                        orientation="h",
-                        yanchor="bottom",
-                        y=1.02,
-                        xanchor="right",
-                        x=1
-                    )
+                fig2.add_trace(go.Scatter(
+                    name=asset,
+                    x=filtered_data['年月'],
+                    y=change_rate,
+                    mode='lines+markers',
+                    line=dict(color=colors2[i], width=3),
+                    marker=dict(size=10, symbol=markers2[i])
+                ))
+            
+            fig2.update_layout(
+                title="円債と貸出金の構成比の変動（開始時点からの変化）",
+                xaxis_title="年月",
+                yaxis_title="構成比変動（%ポイント）",
+                height=400,
+                xaxis=dict(
+                    tickmode='array',
+                    tickvals=filtered_data['年月'],
+                    ticktext=[f"{period[:4]}年{period[5:7]}月" for period in filtered_data['年月']],
+                    tickangle=0
+                ),
+                yaxis=dict(
+                    zeroline=True,
+                    zerolinewidth=1,
+                    zerolinecolor="rgba(128,128,128,0.8)"
+                ),
+                legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
+            )
+            
+            st.plotly_chart(fig2, use_container_width=True)
+            
+            # グラフ3: リスク性証券の有価証券に占める割合
+            st.subheader("📊 グラフ3: リスク性証券の有価証券に占める構成比の変動")
+            
+            fig3 = go.Figure()
+            colors3 = ['#FF8A80', '#81C784', '#64B5F6']
+            markers3 = ['circle', 'square', 'diamond']
+            
+            for i, risk_security in enumerate(risk_securities):
+                # 各リスク性証券の有価証券に占める割合を計算
+                ratio = filtered_data.apply(
+                    lambda row: (row[risk_security] / row['有価証券合計'] * 100) if row['有価証券合計'] > 0 else 0,
+                    axis=1
                 )
                 
-            else:  # エリアグラフ
-                fig = go.Figure()
+                # 開始時点からの変化率を計算（開始時点を0とする）
+                base_ratio = ratio.iloc[0] if len(ratio) > 0 else 0
+                change_rate = ratio - base_ratio
                 
-                colors = px.colors.qualitative.Set3
-                for i, security in enumerate(securities_columns):
-                    fig.add_trace(go.Scatter(
-                        name=security,
-                        x=chart_data['年月'],
-                        y=chart_data[security],
-                        mode='lines',
-                        stackgroup='one',
-                        fill='tonexty' if i > 0 else 'tozeroy',
-                        line_color=colors[i % len(colors)]
-                    ))
-                
-                fig.update_layout(
-                    title="証券データの時系列推移（エリアグラフ）",
-                    xaxis_title="年月",
-                    yaxis_title="金額（百万円）",
-                    height=600,
-                    legend=dict(
-                        orientation="h",
-                        yanchor="bottom",
-                        y=1.02,
-                        xanchor="right",
-                        x=1
-                    )
-                )
-        
-        else:  # 比率グラフ
-            if chart_type == "円グラフ（最新期）":
-                # 最新期のデータを取得
-                latest_data = chart_data.iloc[-1]
-                
-                # 0でない証券のみを表示
-                pie_labels = []
-                pie_values = []
-                pie_colors = []
-                colors = px.colors.qualitative.Set3
-                
-                for i, security in enumerate(securities_columns):
-                    if latest_data[security] > 0:
-                        pie_labels.append(security)
-                        pie_values.append(latest_data[security])
-                        pie_colors.append(colors[i % len(colors)])
-                
-                fig = go.Figure(data=[go.Pie(
-                    labels=pie_labels,
-                    values=pie_values,
-                    marker_colors=pie_colors,
-                    textinfo='label+percent',
-                    textposition="auto",
-                    hovertemplate='%{label}<br>金額: %{value:,.0f}百万円<br>割合: %{percent}<extra></extra>'
-                )])
-                
-                fig.update_layout(
-                    title=f"証券構成比率（{latest_data['年月']}）",
-                    height=600,
-                    showlegend=True,
-                    legend=dict(
-                        orientation="h",
-                        yanchor="bottom",
-                        y=-0.1,
-                        xanchor="center",
-                        x=0.5
-                    )
+                fig3.add_trace(go.Scatter(
+                    name=risk_security,
+                    x=filtered_data['年月'],
+                    y=change_rate,
+                    mode='lines+markers',
+                    line=dict(color=colors3[i], width=3),
+                    marker=dict(size=10, symbol=markers3[i])
+                ))
+            
+            fig3.update_layout(
+                title="リスク性証券の有価証券に占める構成比の変動（開始時点からの変化）",
+                xaxis_title="年月",
+                yaxis_title="構成比変動（%ポイント）",
+                height=400,
+                xaxis=dict(
+                    tickmode='array',
+                    tickvals=filtered_data['年月'],
+                    ticktext=[f"{period[:4]}年{period[5:7]}月" for period in filtered_data['年月']],
+                    tickangle=0
+                ),
+                yaxis=dict(
+                    zeroline=True,
+                    zerolinewidth=1,
+                    zerolinecolor="rgba(128,128,128,0.8)"
+                ),
+                legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
+            )
+            
+            st.plotly_chart(fig3, use_container_width=True)
+            
+            # グラフ4: 有価証券の構成比
+            st.subheader("📊 グラフ4: 有価証券の構成比")
+            
+            fig4 = go.Figure()
+            colors4 = ['#FF6B6B', '#4ECDC4', '#45B7D1', '#96CEB4', '#FF8A80', '#81C784', '#64B5F6']
+            
+            for i, security in enumerate(securities_only):
+                # 各証券の有価証券に占める割合を計算
+                ratio = filtered_data.apply(
+                    lambda row: (row[security] / row['有価証券合計'] * 100) if row['有価証券合計'] > 0 else 0,
+                    axis=1
                 )
                 
-            elif chart_type == "比率積み上げ棒グラフ":
-                fig = go.Figure()
-                
-                colors = px.colors.qualitative.Set3
-                for i, security in enumerate(securities_columns):
-                    fig.add_trace(go.Bar(
-                        name=security,
-                        x=ratio_data['年月'],
-                        y=ratio_data[security],
-                        marker_color=colors[i % len(colors)]
-                    ))
-                
-                fig.update_layout(
-                    title="証券構成比率の時系列推移（積み上げ棒グラフ）",
-                    xaxis_title="年月",
-                    yaxis_title="構成比率（%）",
-                    barmode='stack',
-                    height=600,
-                    yaxis=dict(range=[0, 100]),
-                    legend=dict(
-                        orientation="h",
-                        yanchor="bottom",
-                        y=1.02,
-                        xanchor="right",
-                        x=1
-                    )
-                )
-                
-            else:  # 比率線グラフ
-                fig = go.Figure()
-                
-                colors = px.colors.qualitative.Set3
-                for i, security in enumerate(securities_columns):
-                    fig.add_trace(go.Scatter(
-                        name=security,
-                        x=ratio_data['年月'],
-                        y=ratio_data[security],
-                        mode='lines+markers',
-                        line_color=colors[i % len(colors)]
-                    ))
-                
-                fig.update_layout(
-                    title="証券構成比率の時系列推移（線グラフ）",
-                    xaxis_title="年月",
-                    yaxis_title="構成比率（%）",
-                    height=600,
-                    yaxis=dict(range=[0, 100]),
-                    legend=dict(
-                        orientation="h",
-                        yanchor="bottom",
-                        y=1.02,
-                        xanchor="right",
-                        x=1
-                    )
-                )
-        
-        # グラフを表示
-        st.plotly_chart(fig, use_container_width=True)
-        
-        # データテーブルも表示
-        st.subheader("📊 データテーブル")
-        
-        # 表示用にデータを整形
-        if graph_category == "金額グラフ":
-            display_chart_data = chart_data.copy()
-            for col in securities_columns + (['合計'] if show_total else []):
-                if col in display_chart_data.columns:
-                    display_chart_data[col] = display_chart_data[col].apply(lambda x: f"{x:,.0f}")
-        else:  # 比率グラフ
-            display_chart_data = ratio_data.copy()
-            # 合計列を削除（比率では不要）
-            if '合計' in display_chart_data.columns:
-                display_chart_data = display_chart_data.drop('合計', axis=1)
+                fig4.add_trace(go.Bar(
+                    name=security,
+                    x=filtered_data['年月'],
+                    y=ratio,
+                    marker_color=colors4[i]
+                ))
+            
+            fig4.update_layout(
+                title="有価証券の構成比の推移",
+                xaxis_title="年月",
+                yaxis_title="構成比（%）",
+                barmode='stack',
+                height=400,
+                yaxis=dict(range=[0, 100]),
+                xaxis=dict(
+                    tickmode='array',
+                    tickvals=filtered_data['年月'],
+                    ticktext=[f"{period[:4]}年{period[5:7]}月" for period in filtered_data['年月']],
+                    tickangle=0
+                ),
+                legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
+            )
+            
+            st.plotly_chart(fig4, use_container_width=True)
+            
+            
+            # データテーブル表示
+            st.markdown("---")
+            st.subheader("📊 選択期間のデータテーブル")
+            
+            # 表示用データの準備
+            display_data = filtered_data[['年月'] + securities_columns].copy()
+            
+            # 数値を見やすい形式でフォーマット
             for col in securities_columns:
-                if col in display_chart_data.columns:
-                    display_chart_data[col] = display_chart_data[col].apply(lambda x: f"{x:.1f}%")
-        
-        st.dataframe(display_chart_data, use_container_width=True)
-        
-        # 統計情報
-        st.subheader("📈 統計情報")
-        col_stat1, col_stat2, col_stat3 = st.columns(3)
-        
-        with col_stat1:
-            st.metric("データ期間数", len(chart_data))
-        
-        if graph_category == "金額グラフ":
+                display_data[col] = display_data[col].apply(lambda x: f"{x:,.0f}")
+            
+            st.dataframe(display_data, use_container_width=True)
+            
+            # 統計情報
+            st.subheader("📈 統計情報")
+            col_stat1, col_stat2, col_stat3 = st.columns(3)
+            
+            with col_stat1:
+                st.metric("選択期間数", len(filtered_data))
+            
             with col_stat2:
-                latest_total = chart_data[securities_columns].sum(axis=1).iloc[-1] if len(chart_data) > 0 else 0
-                st.metric("最新期合計", f"{latest_total:,.0f} 百万円")
+                latest_securities_total = filtered_data['有価証券合計'].iloc[-1] if len(filtered_data) > 0 else 0
+                st.metric("最新期有価証券合計", f"{latest_securities_total:,.0f} 百万円")
             
             with col_stat3:
-                avg_total = chart_data[securities_columns].sum(axis=1).mean() if len(chart_data) > 0 else 0
-                st.metric("期間平均", f"{avg_total:,.0f} 百万円")
-        else:  # 比率グラフ
-            with col_stat2:
-                # 最新期で最も高い比率の証券を表示
-                if len(chart_data) > 0:
-                    latest_ratios = ratio_data.iloc[-1][securities_columns]
-                    max_security = latest_ratios.idxmax()
-                    max_ratio = latest_ratios.max()
-                    st.metric("最新期最大比率", f"{max_security}: {max_ratio:.1f}%")
-                else:
-                    st.metric("最新期最大比率", "データなし")
-            
-            with col_stat3:
-                # 期間を通じて最も安定している証券（標準偏差が最小）を表示
-                if len(chart_data) > 1:
-                    ratio_std = ratio_data[securities_columns].std()
-                    most_stable = ratio_std.idxmin()
-                    stability_value = ratio_std.min()
-                    st.metric("最安定証券", f"{most_stable}: σ{stability_value:.1f}%")
-                else:
-                    st.metric("最安定証券", "データ不足")
-        
-        # 比率グラフの場合は追加の分析情報を表示
-        if graph_category == "比率グラフ" and len(chart_data) > 1:
-            st.subheader("📊 構成比率分析")
-            
-            # 各証券の平均比率と変動係数を表示
-            analysis_data = []
-            for security in securities_columns:
-                avg_ratio = ratio_data[security].mean()
-                std_ratio = ratio_data[security].std()
-                cv = (std_ratio / avg_ratio * 100) if avg_ratio > 0 else 0  # 変動係数
-                
-                analysis_data.append({
-                    '証券種類': security,
-                    '平均比率': f"{avg_ratio:.1f}%",
-                    '標準偏差': f"{std_ratio:.1f}%",
-                    '変動係数': f"{cv:.1f}%"
-                })
-            
-            analysis_df = pd.DataFrame(analysis_data)
-            st.dataframe(analysis_df, use_container_width=True)
-            
-            # 比率変化の傾向分析
-            st.subheader("📈 比率変化の傾向")
-            
-            if len(chart_data) >= 2:
-                trend_info = []
-                first_period = ratio_data.iloc[0]
-                latest_period = ratio_data.iloc[-1]
-                
-                for security in securities_columns:
-                    change = latest_period[security] - first_period[security]
-                    if abs(change) > 1:  # 1%以上の変化のみ表示
-                        trend = "増加" if change > 0 else "減少"
-                        trend_info.append(f"• **{security}**: {abs(change):.1f}%ポイント{trend}")
-                
-                if trend_info:
-                    st.write("**期間全体での主要な変化:**")
-                    for info in trend_info:
-                        st.markdown(info)
-                else:
-                    st.write("大きな構成比率の変化は見られません（±1%以内）")
+                latest_loans = filtered_data['貸出金'].iloc[-1] if len(filtered_data) > 0 else 0
+                st.metric("最新期貸出金", f"{latest_loans:,.0f} 百万円")
         
     else:
         st.info("📝 データベースにデータがありません。まずはデータ抽出ページでPDFファイルを処理してデータを追加してください。")
@@ -946,7 +882,7 @@ st.markdown("---")
 st.markdown(
     """
     <div style='text-align: center; color: #666; font-size: 0.8em;'>
-    証券データ抽出システム | 地方銀行主要勘定PDFから各種証券データを抽出します
+    地方銀行財務データ抽出システム | 地方銀行主要勘定PDFから貸出金・証券データを抽出します
     </div>
     """,
     unsafe_allow_html=True
